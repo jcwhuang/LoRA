@@ -5,15 +5,20 @@
 import logging
 import math
 import os
-from collections import OrderedDict 
-import argparse
 
 import torch
 from torch import nn
 from torch.nn import CrossEntropyLoss, MSELoss
 import torch.nn.functional as F
+
 from torch.optim import Optimizer
-from torch.optim.lr_scheduler import LambdaLR, _LRScheduler
+from torch.optim.lr_scheduler import LambdaLR
+
+from collections import OrderedDict 
+import argparse
+
+from torch.optim.lr_scheduler import _LRScheduler
+from dataclasses import dataclass, field
 
 
 def add_optimizer_params(parser: argparse.ArgumentParser):
@@ -39,6 +44,59 @@ def add_optimizer_params(parser: argparse.ArgumentParser):
     parser.add_argument('--i_lrs', type=str, default='0.00025', help='interval_lrs')
 
 
+@dataclass
+class OptimizerParams:
+    lr: float = field(
+            default=0.00001, 
+            metadata={"help":'learning rate.'})
+    
+    weight_decay: float = field(
+            default=0.01, 
+            metadata={"help":'weight decay rate.'})
+    
+    correct_bias: bool = field(
+            default=True, 
+            metadata={"help":'correct adam bias term.'})
+    
+    adam_epislon: float = field(
+            default=1e-6, 
+            metadata={"help": 'adam epsilon.'})
+    
+    no_decay_bias: bool = field(
+            default=True,
+            metadata={"help": 'no weight decay on bias weigh.'})
+    
+    adam_beta1: float = field(
+            default=0.9,
+            metadata={"help": 'adam beta1 term.'})
+
+    adam_beta2: float = field(
+            default=0.98, 
+            metadata={"help": 'adam beta2 term.'})
+    
+    scheduler: str = field(
+            default='linear')
+
+    max_step: int = field(
+            default=None, 
+            metadata={"help": 'upper epoch limit'})
+
+    max_epoch: int = field(
+            default=None, 
+            metadata={"help": 'max epoch of training.'})
+
+    warmup_step: int = field(
+            default=0, 
+            metadata={"help": 'upper epoch limit'})
+
+    i_steps: str = field(
+            default='0', 
+            metadata={"help": 'interval_steps'})
+
+    i_lrs: str = field(
+            default='0.00025', 
+            metadata={"help": 'interval_lrs'})
+
 class AdamW(Optimizer):
     """ Implements Adam algorithm with weight decay fix.
     Parameters:
@@ -59,15 +117,6 @@ class AdamW(Optimizer):
             raise ValueError("Invalid epsilon value: {} - should be >= 0.0".format(eps))
         defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay, correct_bias=correct_bias)
         super().__init__(params, defaults)
-
-
-    def reset_state(self):
-        for group in param_groups:
-            for p in group['params']:
-                state = self.state[p]
-                state['step'] = 0
-                state["exp_avg"] = torch.zeros_like(p.data)
-                state["exp_avg_sq"] = torch.zeros_like(p.data)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -250,7 +299,6 @@ def get_constant_schedule_with_warmup(optimizer, num_warmup_steps, num_training_
         return 1.0
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
-
 def create_grouped_parameters(model, no_decay_bias): # args):
     if not no_decay_bias:
         optimizer_grouped_parameters = [
@@ -279,11 +327,7 @@ def create_adam_optimizer(model, lr, weight_decay, optimizer_grouped_parameters=
     optimizer = AdamW(optimizer_grouped_parameters, lr=lr, betas=(beta1, beta2), eps=adam_epislon, weight_decay=weight_decay, correct_bias=correct_bias)
     return optimizer
 
-
-def create_sgd_optimizer(model, lr):
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.0)
-    return optimizer
-    
+#def create_parameter_optimizer(, args):
 
 def create_adam_optimizer_from_args(model, args, grouped_parameters=None):
     if grouped_parameters is None:
