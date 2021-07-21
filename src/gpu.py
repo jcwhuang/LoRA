@@ -15,6 +15,8 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.distributed as dist
 
+from dataclasses import dataclass, field
+
 
 def add_gpu_params(parser: argparse.ArgumentParser):
   parser.add_argument("--platform", default='local', type=str, 
@@ -26,14 +28,11 @@ def add_gpu_params(parser: argparse.ArgumentParser):
   
 
 @dataclass
-class GpuParams:
+class GpuArguments:
   platform: str = field(
           default='local', 
-          choices=['local', 'azure', 'k8s'], 
-          metadata={"help": 'platform local or cloud'})
-  local_rank: int = field(
-          default=0, 
-          metadata={"help": 'local rank'})
+          metadata={"help": 'platform local or cloud',
+                    "choices": ['local', 'azure', 'k8s']})
   rank: int = field(
           default=0, 
           metadata={"help": 'rank'})

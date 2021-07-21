@@ -45,7 +45,7 @@ def add_optimizer_params(parser: argparse.ArgumentParser):
 
 
 @dataclass
-class OptimizerParams:
+class OptimizerArguments:
     lr: float = field(
             default=0.00001, 
             metadata={"help":'learning rate.'})
@@ -75,7 +75,9 @@ class OptimizerParams:
             metadata={"help": 'adam beta2 term.'})
     
     scheduler: str = field(
-            default='linear')
+            default='linear',
+            metadata={"help": 'lr scheduler to use.',
+                      "choices": ['cosine', 'inv_sqrt', 'dev_perf', 'constant', 'linear', 'cycle']})
 
     max_step: int = field(
             default=None, 

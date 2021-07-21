@@ -14,16 +14,18 @@ import numpy as np
 
 from gpu import (
   add_gpu_params, 
+  GpuArguments,
   parse_gpu, 
   distributed_opt, 
   distributed_gather, 
   distributed_sync, 
   cleanup
 )
+
 from optimizer import (
   create_adam_optimizer, 
   create_optimizer_scheduler, 
-  OptimizerParams,
+  OptimizerArguments,
   create_adam_optimizer_from_args
 )
 
@@ -32,17 +34,13 @@ from model import GPT2Config, GPT2LMModel
 from exp_utils import create_exp_dir
   
 
-from transformers import Trainer, TrainingArguments
+from transformers import Trainer, TrainingArguments, HfArgumentParser
 
 import itertools
 
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 
-
-parser = argparse.ArgumentParser(description='PyTorch GPT2 finetuning + transformers Trainer script.')
-
-add_gpu_params(parser)
 
 @dataclass
 class DataTrainingArguments:
@@ -65,26 +63,19 @@ class DataTrainingArguments:
           default=1,
           metadata={"help": 'gradient accumlate'})
 
-  clip: float = field(
-          default=0.0, 
-          metadata={"help": 'gradient clip'})
-
   seq_len: int = field(
           default=512,
           metadata={"help": 'number of tokens to predict.'})
 
   model_card: str = field(
           default='gpt2.sm', 
-          choices=['gpt2.sm', 'gpt2.md', 'gpt2.lg'], 
-          metadata={"help": 'model names.'})
+           
+          metadata={"help": 'model names.',
+              "choices": ['gpt2.sm', 'gpt2.md', 'gpt2.lg']})
 
   init_checkpoint: str = field(
           default=None,
           metadata={"help": 'initial checkpoint.'})
-
-  fp16: bool = field(
-          default=True,
-          metadata={"help": 'model fp16.'})
 
   log_interval: int = field(
           default=100, 
@@ -112,8 +103,8 @@ class DataTrainingArguments:
 
   obj: str = field(
           default='clm', 
-          choices=['jlm', 'clm'], 
-          metadata={"help": 'language model training objective.'})
+          metadata={"help": 'language model training objective.',
+                    "choices": ['jlm', 'clm']})
 
   lora_dropout: float = field(
           default=0.0, 
@@ -125,15 +116,34 @@ class DataTrainingArguments:
 
   random_seed: int = field(
           default=1, 
-          metadata={("help="'random seed.'})
+          metadata={"help": 'random seed.'})
+
+  prefix_len: int = field(
+          default=0,
+          metadata={"help": "prefix length"})
+
+  infix_len: int = field(
+          default=0,
+          metadata={"help": "infix length"})
+
+  roll_interval: int = field(
+          default=-1,
+          metadata={"help": "rolling interval"})
+
+  roll_lr: float = field(
+          default=0.00001,
+          metadata={"help": "rolling learning rate"})
+
+  roll_step: int = field(
+          default=100,
+          metadata={"help": "rolling step"})
 
 
 def print_args(args):
-  if args.rank == 0:
-    print('=' * 100)
-    for k, v in args.__dict__.items():
-      print('    - {} : {}'.format(k, v))
-    print('=' * 100)
+  print('=' * 100)
+  for k, v in args.__dict__.items():
+    print('    - {} : {}'.format(k, v))
+  print('=' * 100)
 
 
 class AverageMeter(object):
@@ -154,27 +164,6 @@ class AverageMeter(object):
     self.sum += val * n
     self.count += n
     self.avg = self.sum / self.count
-
-
-def optimizer_step(_loss, _optimizer, _model, _schedule, args, is_update=True):
-  if args.fp16:
-    with amp.scale_loss(_loss, _optimizer) as _scaled_loss:
-      _scaled_loss.backward()
-  else:
-    _loss.backward()
-
-  if is_update:
-    if args.clip > 0:
-      if args.fp16:
-        torch.nn.utils.clip_grad_norm_(amp.master_params(_optimizer), args.clip)
-      else:
-        torch.nn.utils.clip_grad_norm_(_model.parameters(), args.clip)
-
-    _optimizer.step()    
-    _optimizer.zero_grad()
-
-  if _schedule is not None:
-    _schedule.step()
 
 
 def evaluate(model, valid_loader, args):
@@ -282,16 +271,18 @@ def train_validate(model, optimizer, scheduler, train_loader, valid_loader, args
 
 
 if __name__ == '__main__':
-  args = parser.parse_args()
-  parse_gpu(args)
+  parser = HfArgumentParser((DataTrainingArguments, TrainingArguments))
+  args, training_args = parser.parse_args_into_dataclasses()
+
   print_args(args)
+  print_args(training_args)
   
-  if args.rank == 0:
-    args.logging = create_exp_dir(args.work_dir)
+  #if args.rank == 0:
+  #  args.logging = create_exp_dir(args.work_dir)
 
   train_data =  FT_Dataset(
     args.train_data, args.train_batch_size, args.seq_len, 
-    joint_lm=args.obj=='jlm',
+    joint_lm=args.obj=='jlm', prefix_len=args.prefix_len, infix_len=args.infix_len
   )   
   
   valid_data = FT_Dataset(
@@ -333,57 +324,33 @@ if __name__ == '__main__':
 
   lm_net = lm_net.cuda()
 
-  if args.lora_dim == 0:
-    optimizer = create_adam_optimizer_from_args(lm_net, args)
-  else:
-    for n, p in lm_net.named_parameters():
-      if 'adapter' in n:
-        print(f'{n}, shape: {p.shape}')
-      else:
-        p.requires_grad = False
-        
-    optimizer_grouped_parameters = [
-        {
-            "params": [p for n, p in lm_net.named_parameters() if 'adapter' in n],
-        }
-    ]
-    optimizer = create_adam_optimizer_from_args(
-      None, args, grouped_parameters=optimizer_grouped_parameters
-    )
-
   if args.max_step is None:
     args.max_step = (args.max_epoch * train_data.num_batches + args.world_size - 1) // args.world_size
     print('set max_step:', args.max_step)
 
-  scheduler = create_optimizer_scheduler(optimizer, args)
-  if args.fp16:
-    lm_net, optimizer = amp.initialize(lm_net, optimizer, opt_level="O1")
-  lm_net, optimizer = distributed_opt(args, lm_net, optimizer, grad_acc=args.grad_acc)
-
   try:
-    trainer = Trainer(
-            model=lm_net,
-            args=args,
-            train_dataset=train_data,
-            eval_dataset=valid_data,
-            optimizers=(optimizer, scheduler)
-            )
-    train_step = 0
-    for epoch in itertools.count(start=1):
-      train_step = train_validate(
-        lm_net, optimizer, scheduler, train_loader, valid_loader, args, 
-        train_step=train_step, epoch = epoch
-      )
-      
-      if train_step >= args.max_step or (args.max_epoch is not None and epoch >= args.max_epoch):
-        if args.rank == 0:
-          print('-' * 100)
-          print('End of training')
-        break
+    if training_args.do_train:
+      trainer = Trainer(
+              model=lm_net,
+              args=training_args,
+              train_dataset=train_data,
+              eval_dataset=valid_data
+              )
+      train_result = trainer.train()
+      metrics = train_result.metrics
+
+      max_train_samples = (
+                          data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
+                                  )
+      metrics["train_samples"] = min(max_train_samples, len(train_dataset))
+
+      trainer.log_metrics("train", metrics)
+      trainer.save_metrics("train", metrics)
+      trainer.save_state()
+
   except KeyboardInterrupt:
-    if args.rank == 0:
-      print('-' * 100)
-      print('Exiting from training early')
+    print('-' * 100)
+    print('Exiting from training early')
 
   distributed_sync(args)
   print('cleanup dist ...')
