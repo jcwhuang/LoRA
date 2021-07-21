@@ -29,7 +29,7 @@ from optimizer import (
   create_adam_optimizer_from_args
 )
 
-from data_utils import FT_Dataset # BinCorpus, BinLMOrderedIterator
+from data_utils import FT_Dataset_Trainer # BinCorpus, BinLMOrderedIterator
 from model import GPT2Config, GPT2LMModel
 from exp_utils import create_exp_dir
   
@@ -280,13 +280,16 @@ if __name__ == '__main__':
   #if args.rank == 0:
   #  args.logging = create_exp_dir(args.work_dir)
 
-  train_data =  FT_Dataset(
+  train_data =  FT_Dataset_Trainer(
     args.train_data, args.train_batch_size, args.seq_len, 
-    joint_lm=args.obj=='jlm', prefix_len=args.prefix_len, infix_len=args.infix_len
+    joint_lm=args.obj=='jlm', prefix_len=args.prefix_len, infix_len=args.infix_len,
+    label_smooth=args.label_smooth
   )   
   
-  valid_data = FT_Dataset(
+  valid_data = FT_Dataset_Trainer(
     args.valid_data, args.valid_batch_size, args.seq_len,
+    prefix_len=args.prefix_len, infix_len=args.infix_len,
+    label_smooth=0.0
   )
 
   if args.model_card == 'gpt2.sm':

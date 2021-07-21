@@ -267,3 +267,19 @@ class FT_Dataset(Dataset):
                 completion = items['completion']
                 ft_samples.append([context, completion])
         return ft_samples
+
+
+class FT_Dataset_Trainer(FT_Dataset):
+    def __init__(self, *args, label_smooth, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.label_smooth = label_smooth
+
+    def __getitem__(self, item):
+        input_dict = super().__getitem__(item)
+        return {
+                "input_ids": input_dict["input"],
+                "lm_labels": input_dict["target"],
+                "lm_mask": input_dict["mask"],
+                "label_smooth": self.label_smooth
+                }
+
