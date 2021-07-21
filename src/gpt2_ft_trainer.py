@@ -289,18 +289,6 @@ if __name__ == '__main__':
     args.valid_data, args.valid_batch_size, args.seq_len,
   )
 
-  train_loader = DataLoader(
-    train_data, batch_size=args.train_batch_size, 
-    num_workers=0, shuffle=False, pin_memory=False, drop_last=True,
-    sampler=torch.utils.data.distributed.DistributedSampler(train_data, seed=args.random_seed)
-  )
-  
-  valid_loader = DataLoader(
-    valid_data, batch_size=args.valid_batch_size, 
-    num_workers=0, shuffle=False, pin_memory=False, drop_last=False,
-    sampler=torch.utils.data.distributed.DistributedSampler(valid_data, seed=args.random_seed)
-  )
-
   if args.model_card == 'gpt2.sm':
     config = GPT2Config(
       n_embd=768, n_layer=12, n_head=12, 
@@ -323,10 +311,6 @@ if __name__ == '__main__':
     lm_net.load_weight(torch.load(args.init_checkpoint))  
 
   lm_net = lm_net.cuda()
-
-  if args.max_step is None:
-    args.max_step = (args.max_epoch * train_data.num_batches + args.world_size - 1) // args.world_size
-    print('set max_step:', args.max_step)
 
   try:
     if training_args.do_train:
