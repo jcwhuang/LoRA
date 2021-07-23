@@ -166,6 +166,18 @@ class AverageMeter(object):
     self.avg = self.sum / self.count
 
 
+class MyTrainer(Trainer):
+    def compute_loss(self, model, inputs, return_outputs=False):
+        res = super().compute_loss(model, inputs)
+        if len(res) == 2:
+            loss, outputs = res
+            loss = loss.mean()
+            return loss, outputs
+        else:
+            loss = res.mean()
+            return loss
+
+
 def evaluate(model, valid_loader, args):
   model.eval()
   total_loss = 0.
@@ -317,7 +329,7 @@ if __name__ == '__main__':
 
   try:
     if training_args.do_train:
-      trainer = Trainer(
+      trainer = MyTrainer(
               model=lm_net,
               args=training_args,
               train_dataset=train_data,
