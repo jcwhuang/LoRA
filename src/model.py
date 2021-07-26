@@ -797,6 +797,7 @@ class GPT2LMModel(nn.Module):
     def __init__(self, config):
         super(GPT2LMModel, self).__init__()
         self.transformer = GPT2Model(config)
+        self.config = config
         self.lm_head = GPT2LMHead(self.transformer.wte.weight, config)
         self.apply(self._init_weights)
         
@@ -861,7 +862,7 @@ class GPT2LMModel(nn.Module):
 
         # batch, seq, vocab
         lm_logits = self.lm_head(hidden_states)
-
+        """
         if lm_labels is not None:
 
             if is_report_accuracy:
@@ -908,11 +909,9 @@ class GPT2LMModel(nn.Module):
 
             loss = loss.sum() / (lm_mask.sum() + 0.0001)
 
-            if is_report_accuracy:
-                return lm_logits, loss, _t1_acc, _all_acc
-            else:
-                return lm_logits, loss
-        return lm_logits, presents
+            return lm_logits, loss
+            """
+        return lm_logits #, presents
            
     def _init_weights(self, module):
         if isinstance(module, (nn.Linear, nn.Embedding)):

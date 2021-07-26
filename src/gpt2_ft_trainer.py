@@ -138,6 +138,10 @@ class DataTrainingArguments:
           default=100,
           metadata={"help": "rolling step"})
 
+  device: int = field(
+          default=0, 
+          metadata={"help": 'GPU device'})
+
 
 def print_args(args):
   print('=' * 100)
@@ -168,14 +172,52 @@ class AverageMeter(object):
 
 class MyTrainer(Trainer):
     def compute_loss(self, model, inputs, return_outputs=False):
-        res = super().compute_loss(model, inputs)
-        if len(res) == 2:
-            loss, outputs = res
-            loss = loss.mean()
-            return loss, outputs
+        inputs = {key: value.to(args.device) for key, value in inputs.items()}
+
+        lm_logits = model(**inputs)
+        _batch, _len = inputs['input_ids'].shape
+        # copied from GPT2LMModel
+        label_smooth, lm_labels, lm_mask = inputs['label_smooth'], inputs['lm_labels'], inputs['lm_mask']
+        if label_smooth > 0.0001:
+            logprobs = torch.nn.functional.log_softmax(lm_logits.view(-1, lm_logits.size(-1)), dim=-1)
+            nll_loss = -logprobs.gather(dim=-1, index=lm_labels.view(-1).unsqueeze(1))
+            nll_loss = nll_loss.squeeze(1)
+            smooth_loss = -logprobs.mean(dim=-1)
+            loss = (1.0 - label_smooth) * nll_loss + label_smooth * smooth_loss
+            loss = loss.view(_batch, _len)
         else:
-            loss = res.mean()
-            return loss
+            loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-1, reduce=False)
+            loss = loss_fct(lm_logits.view(-1, lm_logits.size(-1)), lm_labels.view(-1)).view(_batch, _len)
+
+        if lm_mask is None:
+            lm_mask = torch.ones(loss.shape, dtype=loss.dtype, device=loss.device)
+        loss = loss * lm_mask 
+
+        loss = loss.sum() / (lm_mask.sum() + 0.0001)
+
+        return (loss, lm_logits) if return_outputs else loss
+
+    def prediction_loop(self, dataloader, description, prediction_loss_only=None, ignore_keys=None, metric_key_prefix="eval"):
+        self.model.eval()
+        total_loss = 0.
+        start_time = time.time()
+      
+        avg_lm_loss = AverageMeter()
+      
+        with torch.no_grad():
+          for idx, data in enumerate(dataloader):
+            _loss = self.compute_loss(self.model, data)
+            loss = _loss.mean() 
+            
+            avg_lm_loss.update(loss.item())
+      
+            if idx % 100 == 0:
+              print('eval samples:', idx, 'loss:', loss.float())
+      
+          total_time = time.time() - start_time
+          print('average loss', avg_lm_loss.avg)
+        metrics = {f"{metric_key}_avg_loss": avg_lm_loss.avg, f"{metric_key}_ppl": math.exp(avg_lm_loss.avg)}
+        return EvalLoopOutput(predictions=None, label_ids=None, metrics=metrics, num_samples=None)
 
 
 def evaluate(model, valid_loader, args):
