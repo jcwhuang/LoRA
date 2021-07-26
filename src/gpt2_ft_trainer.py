@@ -9,6 +9,7 @@ import os, sys
 
 import torch
 torch.set_printoptions(threshold=100000)
+from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
 
@@ -367,6 +368,7 @@ if __name__ == '__main__':
     lm_net.load_weight(torch.load(args.init_checkpoint))  
 
   lm_net = lm_net.cuda()
+  writer = SummaryWriter()
 
   try:
     if training_args.do_train:
@@ -374,7 +376,8 @@ if __name__ == '__main__':
               model=lm_net,
               args=training_args,
               train_dataset=train_data,
-              eval_dataset=valid_data
+              eval_dataset=valid_data,
+              tb_writer=writer
               )
       train_result = trainer.train()
       metrics = train_result.metrics
