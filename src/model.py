@@ -862,9 +862,8 @@ class GPT2LMModel(nn.Module):
 
         # batch, seq, vocab
         lm_logits = self.lm_head(hidden_states)
-        """
+        """ 
         if lm_labels is not None:
-
             if is_report_accuracy:
                 _pred_token = torch.argmax(lm_logits, dim=-1)
                 _hit = (_pred_token == lm_labels) * lm_mask
@@ -910,7 +909,7 @@ class GPT2LMModel(nn.Module):
             loss = loss.sum() / (lm_mask.sum() + 0.0001)
 
             return lm_logits, loss
-            """
+        """
         return lm_logits #, presents
            
     def _init_weights(self, module):

@@ -177,13 +177,13 @@ class MyTrainer(Trainer):
         lm_logits = model(**inputs)
         _batch, _len = inputs['input_ids'].shape
         # copied from GPT2LMModel
-        label_smooth, lm_labels, lm_mask = inputs['label_smooth'], inputs['lm_labels'], inputs['lm_mask']
-        if label_smooth > 0.0001:
+        lm_labels, lm_mask = inputs['lm_labels'], inputs['lm_mask']
+        if args.label_smooth > 0.0001:
             logprobs = torch.nn.functional.log_softmax(lm_logits.view(-1, lm_logits.size(-1)), dim=-1)
             nll_loss = -logprobs.gather(dim=-1, index=lm_labels.view(-1).unsqueeze(1))
             nll_loss = nll_loss.squeeze(1)
             smooth_loss = -logprobs.mean(dim=-1)
-            loss = (1.0 - label_smooth) * nll_loss + label_smooth * smooth_loss
+            loss = (1.0 - args.label_smooth) * nll_loss + args.label_smooth * smooth_loss
             loss = loss.view(_batch, _len)
         else:
             loss_fct = torch.nn.CrossEntropyLoss(ignore_index=-1, reduce=False)
@@ -336,14 +336,12 @@ if __name__ == '__main__':
 
   train_data =  FT_Dataset_Trainer(
     args.train_data, args.train_batch_size, args.seq_len, 
-    joint_lm=args.obj=='jlm', prefix_len=args.prefix_len, infix_len=args.infix_len,
-    label_smooth=args.label_smooth
+    joint_lm=args.obj=='jlm', prefix_len=args.prefix_len, infix_len=args.infix_len
   )   
   
   valid_data = FT_Dataset_Trainer(
     args.valid_data, args.valid_batch_size, args.seq_len,
-    prefix_len=args.prefix_len, infix_len=args.infix_len,
-    label_smooth=0.0
+    prefix_len=args.prefix_len, infix_len=args.infix_len
   )
 
   if args.model_card == 'gpt2.sm':
