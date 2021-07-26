@@ -35,6 +35,7 @@ from exp_utils import create_exp_dir
   
 
 from transformers import Trainer, TrainingArguments, HfArgumentParser
+from transformers.trainer_utils import PredictionOutput
 
 import itertools
 
@@ -217,7 +218,7 @@ class MyTrainer(Trainer):
           total_time = time.time() - start_time
           print('average loss', avg_lm_loss.avg)
         metrics = {f"{metric_key_prefix}_avg_loss": avg_lm_loss.avg, f"{metric_key_prefix}_ppl": math.exp(avg_lm_loss.avg)}
-        return EvalLoopOutput(predictions=None, label_ids=None, metrics=metrics, num_samples=None)
+        return PredictionOutput(predictions=None, label_ids=None, metrics=metrics)
 
 
 def evaluate(model, valid_loader, args):
