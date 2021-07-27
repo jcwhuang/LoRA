@@ -43,6 +43,11 @@ import itertools
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 
+import glob
+import logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
+
 
 @dataclass
 class DataTrainingArguments:
@@ -94,6 +99,10 @@ class DataTrainingArguments:
   work_dir: str = field(
           default=os.getenv('PT_OUTPUT_DIR', 'gpt2_model'), 
           metadata={"help": 'working folder.'})
+
+  init_checkpoint_dir: str = field(
+          default=None, 
+          metadata={"help": 'path to checkpoint dir to initialize with'})
 
   lora_dim: int = field(
           default=0, 
@@ -220,6 +229,22 @@ class MyTrainer(Trainer):
           print('average loss', avg_lm_loss.avg)
         metrics = {f"{metric_key_prefix}_avg_loss": avg_lm_loss.avg, f"{metric_key_prefix}_ppl": math.exp(avg_lm_loss.avg)}
         return PredictionOutput(predictions=None, label_ids=None, metrics=metrics)
+
+    def save_model(self, output_dir):
+        checkpoints = glob.glob(os.path.join(self.args.output_dir, "checkpoint*"))
+
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
+        logger.info("Saving model checkpoint to %s", output_dir)
+        if not isinstance(self.model, PreTrainedModel):
+            raise ValueError("Trainer.model appears to not be a PreTrainedModel")
+        self.model.save_pretrained(output_dir)
+        if self.tokenizer is not None:
+            self.tokenizer.save_pretrained(output_dir)
+        torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
+        json.dump(
+                self.log_history, open(os.path.join(output_dir, "log_history.json"), "w"), indent=2, ensure_ascii=False
+        )
 
 
 def evaluate(model, valid_loader, args):
@@ -369,6 +394,7 @@ if __name__ == '__main__':
 
   lm_net = lm_net.cuda()
   writer = SummaryWriter()
+  print(f"Summary writer log dir is: {writer.log_dir}")
 
   try:
     if training_args.do_train:
@@ -379,23 +405,10 @@ if __name__ == '__main__':
               eval_dataset=valid_data,
               tb_writer=writer
               )
-      train_result = trainer.train()
-      metrics = train_result.metrics
-
-      max_train_samples = (
-                          data_args.max_train_samples if data_args.max_train_samples is not None else len(train_dataset)
-                                  )
-      metrics["train_samples"] = min(max_train_samples, len(train_dataset))
-
-      trainer.log_metrics("train", metrics)
-      trainer.save_metrics("train", metrics)
-      trainer.save_state()
+      train_result = trainer.train(
+              model_path=args.init_checkpoint_dir
+              )
 
   except KeyboardInterrupt:
     print('-' * 100)
     print('Exiting from training early')
-
-  distributed_sync(args)
-  print('cleanup dist ...')
-  cleanup(args)
-
