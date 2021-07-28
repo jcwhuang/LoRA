@@ -231,7 +231,17 @@ class MyTrainer(Trainer):
         return PredictionOutput(predictions=None, label_ids=None, metrics=metrics)
 
     def save_model(self, output_dir):
-        checkpoints = glob.glob(os.path.join(self.args.output_dir, "checkpoint*"))
+        log_histories = glob.glob(os.path.join(self.args.output_dir, "checkpoint*", "log_history.json"))
+        log_histories = [json.load(open(log_history) for log_history in log_histories)]
+        log_histories.sort(key=lambda obj:-obj["global_step"])
+        most_recent_stats = log_histories[0]
+
+        # if the loss in that file is less than the current performance, then save the model, else do not
+        if not self.log_history["eval_ppl"] < most_recent_stats["eval_ppl"]:
+            logger.info(f"Previous checkpoint at step {most_recent_stats['global_step']} has better ppl at \
+                            {most_recent_stats['eval_ppl']} than current step {self.global_step} at \
+                            {self.log_history['eval_ppl']}. Not saving model checkpoint for step {self.global_step}")
+            return
 
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
