@@ -233,6 +233,8 @@ class MyTrainer(Trainer):
         return PredictionOutput(predictions=None, label_ids=None, metrics=metrics)
 
     def save_model(self, output_dir):
+        output_dir = output_dir if output_dir is not None else self.args.output_dir
+        os.makedirs(output_dir, exist_ok=True)
         log_histories = glob.glob(os.path.join(self.args.output_dir, "checkpoint*", "log_history.json"))
         if len(log_histories) > 0:
           log_histories = [json.load(open(log_history)) for log_history in log_histories]
@@ -243,14 +245,12 @@ class MyTrainer(Trainer):
             most_recent_stats = eval_log_histories[0]
             current_eval_stats = [stats for stats in self.log_history if 'eval_ppl' in stats][0]
             # if the loss in that file is less than the current performance, then save the model, else do not
-            if not current_eval_stats["eval_ppl"] < most_recent_stats["eval_ppl"]:
-                logger.info(f"Previous checkpoint at step {most_recent_stats['step']} has better ppl at " + 
-                                "{most_recent_stats['eval_ppl']} than current step {self.global_step} at " +
-                                "{current_eval_stats['eval_ppl']}. Not saving model checkpoint for step {self.global_step}")
+            if current_eval_stats["eval_ppl"] > most_recent_stats["eval_ppl"]:
+                logger.info("Previous checkpoint at step {} has better ppl at ".format(most_recent_stats['step']) + 
+                                "{} than current step {} at ".format(most_recent_stats['eval_ppl'], self.global_step) +
+                                "{}. Not saving model checkpoint for step {}".format(current_eval_stats['eval_ppl'], self.global_step))
                 return
 
-        output_dir = output_dir if output_dir is not None else self.args.output_dir
-        os.makedirs(output_dir, exist_ok=True)
         logger.info("Saving model checkpoint to %s", output_dir)
         if not isinstance(self.model, PreTrainedModel):
             logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
