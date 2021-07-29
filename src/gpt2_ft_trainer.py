@@ -37,6 +37,7 @@ from exp_utils import create_exp_dir
 
 from transformers import Trainer, TrainingArguments, HfArgumentParser
 from transformers.trainer_utils import PredictionOutput
+from transformers.modeling_utils import PreTrainedModel
 
 import itertools
 
@@ -44,6 +45,7 @@ from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 
 import glob
+import json
 import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
@@ -232,23 +234,30 @@ class MyTrainer(Trainer):
 
     def save_model(self, output_dir):
         log_histories = glob.glob(os.path.join(self.args.output_dir, "checkpoint*", "log_history.json"))
-        log_histories = [json.load(open(log_history) for log_history in log_histories)]
-        log_histories.sort(key=lambda obj:-obj["global_step"])
-        most_recent_stats = log_histories[0]
-
-        # if the loss in that file is less than the current performance, then save the model, else do not
-        if not self.log_history["eval_ppl"] < most_recent_stats["eval_ppl"]:
-            logger.info(f"Previous checkpoint at step {most_recent_stats['global_step']} has better ppl at \
-                            {most_recent_stats['eval_ppl']} than current step {self.global_step} at \
-                            {self.log_history['eval_ppl']}. Not saving model checkpoint for step {self.global_step}")
-            return
+        if len(log_histories) > 0:
+          log_histories = [json.load(open(log_history)) for log_history in log_histories]
+          log_histories = [lh for lh in log_histories if len(lh) > 0]
+          if len(log_histories) > 0:
+            eval_log_histories = [slh for lh in log_histories for slh in lh if 'eval_ppl' in slh]
+            eval_log_histories.sort(key=lambda obj:-obj["step"])
+            most_recent_stats = eval_log_histories[0]
+            current_eval_stats = [stats for stats in self.log_history if 'eval_ppl' in stats][0]
+            # if the loss in that file is less than the current performance, then save the model, else do not
+            if not current_eval_stats["eval_ppl"] < most_recent_stats["eval_ppl"]:
+                logger.info(f"Previous checkpoint at step {most_recent_stats['step']} has better ppl at " + 
+                                "{most_recent_stats['eval_ppl']} than current step {self.global_step} at " +
+                                "{current_eval_stats['eval_ppl']}. Not saving model checkpoint for step {self.global_step}")
+                return
 
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
         logger.info("Saving model checkpoint to %s", output_dir)
         if not isinstance(self.model, PreTrainedModel):
-            raise ValueError("Trainer.model appears to not be a PreTrainedModel")
-        self.model.save_pretrained(output_dir)
+            logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
+            state_dict = self.model.state_dict() 
+            torch.save(state_dict, os.path.join(output_dir, 'pytorch_model.bin'))
+        else:
+            self.model.save_pretrained(output_dir)
         if self.tokenizer is not None:
             self.tokenizer.save_pretrained(output_dir)
         torch.save(self.args, os.path.join(output_dir, "training_args.bin"))
