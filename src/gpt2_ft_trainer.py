@@ -6,6 +6,11 @@ import argparse
 import time
 import math
 import os, sys
+import shutil
+import glob
+import json
+import logging
+import itertools
 
 import torch
 torch.set_printoptions(threshold=100000)
@@ -39,14 +44,10 @@ from transformers import Trainer, TrainingArguments, HfArgumentParser
 from transformers.trainer_utils import PredictionOutput
 from transformers.modeling_utils import PreTrainedModel
 
-import itertools
 
 from torch.utils.data import DataLoader
 from dataclasses import dataclass, field
 
-import glob
-import json
-import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.DEBUG)
 
@@ -232,7 +233,24 @@ class MyTrainer(Trainer):
         metrics = {f"{metric_key_prefix}_avg_loss": avg_lm_loss.avg, f"{metric_key_prefix}_ppl": math.exp(avg_lm_loss.avg)}
         return PredictionOutput(predictions=None, label_ids=None, metrics=metrics)
 
+    def cleanup_checkpoints_with_no_model(self):
+        """ Clean up checkpoint folders with no model state and only optimizer. Hack because Trainer.train separates saving
+            the model and optimizer.
+        """
+        checkpoints_sorted = self._sorted_checkpoints()
+        checkpoint_folders_to_remove = []
+        for checkpoint in checkpoints_sorted:
+            if not os.path.isfile(os.path.join(checkpoint, "pytorch_model.bin")):
+                # mark this folder for removal
+                checkpoint_folders_to_remove.append(checkpoint)
+
+        for folder in checkpoint_folders_to_remove:
+            shutil.rmtree(folder)
+
+
     def save_model(self, output_dir):
+        self.cleanup_checkpoints_with_no_model()
+
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
         log_histories = glob.glob(os.path.join(self.args.output_dir, "checkpoint*", "log_history.json"))
@@ -243,7 +261,10 @@ class MyTrainer(Trainer):
             eval_log_histories = [slh for lh in log_histories for slh in lh if 'eval_ppl' in slh]
             eval_log_histories.sort(key=lambda obj:-obj["step"])
             most_recent_stats = eval_log_histories[0]
-            current_eval_stats = [stats for stats in self.log_history if 'eval_ppl' in stats][0]
+
+            current_eval_stats = [stats for stats in self.log_history if 'eval_ppl' in stats]
+            current_eval_stats.sort(key=lambda obj:-obj["step"])
+            current_eval_stats = current_eval_stats[0]
             # if the loss in that file is less than the current performance, then save the model, else do not
             if current_eval_stats["eval_ppl"] > most_recent_stats["eval_ppl"]:
                 logger.info("Previous checkpoint at step {} has better ppl at ".format(most_recent_stats['step']) + 
@@ -251,7 +272,7 @@ class MyTrainer(Trainer):
                                 "{}. Not saving model checkpoint for step {}".format(current_eval_stats['eval_ppl'], self.global_step))
                 return
 
-        logger.info("Saving model checkpoint to %s", output_dir)
+        logger.info("Saving model checkpoint with eval_ppl {} to {}".format(current_eval_stats["eval_ppl"], output_dir))
         if not isinstance(self.model, PreTrainedModel):
             logger.info("Trainer.model is not a `PreTrainedModel`, only saving its state dict.")
             state_dict = self.model.state_dict() 
