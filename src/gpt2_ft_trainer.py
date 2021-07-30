@@ -11,6 +11,7 @@ import glob
 import json
 import logging
 import itertools
+from tqdm.auto import tqdm
 
 import torch
 torch.set_printoptions(threshold=100000)
@@ -217,19 +218,21 @@ class MyTrainer(Trainer):
         start_time = time.time()
       
         avg_lm_loss = AverageMeter()
+
+        # logging copied from transformers.Trainer.prediction_loop
+        batch_size = dataloader.batch_size
+        logger.info("***** Running %s *****", description)
+        logger.info("  Num examples = %d", self.num_examples(dataloader))
+        logger.info("  Batch size = %d", batch_size)
       
         with torch.no_grad():
-          for idx, data in enumerate(dataloader):
+          for data in tqdm(dataloader, desc=description):
             _loss = self.compute_loss(self.model, data)
             loss = _loss.mean() 
             
             avg_lm_loss.update(loss.item())
       
-            if idx % 100 == 0:
-              print('eval samples:', idx, 'loss:', loss.float())
-      
           total_time = time.time() - start_time
-          print('average loss', avg_lm_loss.avg)
         metrics = {f"{metric_key_prefix}_avg_loss": avg_lm_loss.avg, f"{metric_key_prefix}_ppl": math.exp(avg_lm_loss.avg)}
         return PredictionOutput(predictions=None, label_ids=None, metrics=metrics)
 
